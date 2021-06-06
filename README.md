@@ -103,4 +103,4 @@ For now the ReactJS application (check the other repository) that consumes this 
 3. The ```Protected page``` with a content message that only the logged user can view;
 
 
-You can check the application and its database deployed on the description link! :)
+You can check the full application with database and frontend (ReactJS) running and deployed on the description link! :)

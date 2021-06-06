@@ -65,7 +65,7 @@ cors.init_app(app)
 # Set up the routes
 @app.route('/api/')
 def home():
-    return {"Hello": "World"}, 200
+    return {"JWT Server Application":"Running!"}, 200
 
   
 @app.route('/api/login', methods=['POST'])
@@ -113,7 +113,30 @@ def protected():
     """
     return {'message': 'protected endpoint (allowed usr {})'.format(flask_praetorian.current_user().username)}
 
+@app.route('/api/registration', methods=['POST'])
+def registration():
+    
+    """Register user without validation email, only for test"""
 
-# Run
+    req = flask.request.get_json(force=True)
+    username = req.get('username', None)
+    password = req.get('password', None)
+    
+    with app.app_context():
+        db.create_all()
+        if db.session.query(User).filter_by(username=username).count() < 1:
+            db.session.add(User(
+                username=username,
+                password=guard.hash_password(password),
+                roles='user'
+            ))
+        db.session.commit()
+    
+    user = guard.authenticate(username, password)
+    ret = {'access_token': guard.encode_jwt_token(user)}
+
+    return ret,200
+    
+# Run the example
 if __name__ == '__main__':
     app.run()
