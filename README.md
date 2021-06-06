@@ -1,6 +1,8 @@
 # JWT Login Flask
 
-This is a Flask API JWT based login authentication.
+This is a Flask API JWT based login authentication. 
+
+You can check my [blog post](https://patriciadourado.com/frompat/jwt-login-flask/) of this project if you need more details about Python Virtual Environment setup or other stuffs. I will try to update it as often as possible.
 
 ## Requirements
 
@@ -30,12 +32,12 @@ The database used was PostgreSQL (before being deployed it was modeled through *
 ```
 CREATE TABLE public.users
 (
-  id integer NOT NULL,
-  username text COLLATE pg_catalog."default" NOT NULL,
-  password text COLLATE pg_catalog."default" NOT NULL,
-  roles text COLLATE pg_catalog."default",
-  is_active boolean,
-  CONSTRAINT id PRIMARY KEY (id)
+    id integer NOT NULL DEFAULT nextval('users_id_seq'::regclass),
+    username text COLLATE pg_catalog."default" NOT NULL,
+    password text COLLATE pg_catalog."default" NOT NULL,
+    roles text COLLATE pg_catalog."default",
+    is_active boolean,
+    CONSTRAINT users_pkey PRIMARY KEY (id)
 )
 
 TABLESPACE pg_default;
@@ -43,22 +45,7 @@ TABLESPACE pg_default;
 ALTER TABLE public.users
     OWNER to (insert here your user_database)
 ```
-Make sure to create the database before running the ```api.py``` and insert at least one user, if you prefer to insert it by python you can add the following lines after ```cors.init_app(app)``` line:
-
-**api.py**
-```
-# Add user
-with app.app_context():
-  db.create_all()
-  if db.session.query(User).filter_by(username='myusername').count() < 1:
-      db.session.add(User(
-        id=1,
-        username='my',
-        password=guard.hash_password('mypassword'),
-        roles='admin'
-          ))
-  db.session.commit()
-```
+Make sure to create the database before running the ```api.py``` 
 
 ## Endpoints
 
@@ -79,6 +66,36 @@ The third endpoint refreshes (by POST request) an existing JWT creating a new on
 **4. /api/protected**
 
 The fourth endpoint is a protected endpoint which requires a header with a valid JWT using the ```@flask_praetorian.auth_required``` decorator. The endpoint returns a message with the current user username as a secret message;
+
+**5. /api/registration**
+
+The fifth endpoint is a simple user registration without requiring user email (for now), with the password hash method being invoked only to demonstrate insertion into database if its a new user;
+
+```python
+@app.route('/api/registration', methods=['POST'])
+def registration():
+    
+    """Register user without validation email, only for test"""
+
+    req = flask.request.get_json(force=True)
+    username = req.get('username', None)
+    password = req.get('password', None)
+    
+    with app.app_context():
+        db.create_all()
+        if db.session.query(User).filter_by(username=username).count() < 1:
+            db.session.add(User(
+                username=username,
+                password=guard.hash_password(password),
+                roles='user'
+            ))
+        db.session.commit()
+    
+    user = guard.authenticate(username, password)
+    ret = {'access_token': guard.encode_jwt_token(user)}
+
+    return ret,200
+```
 
 ## Flask-praetorian
 
