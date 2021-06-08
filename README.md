@@ -79,6 +79,7 @@ def login():
     password = req.get('password', None)
     user = guard.authenticate(username, password)
     ret = {'access_token': guard.encode_jwt_token(user)}
+    return ret, 200
 ```
 
 **3. /api/refresh**
