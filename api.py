@@ -4,13 +4,27 @@ from flask.wrappers import Request
 import flask_sqlalchemy
 import flask_praetorian
 import flask_cors
+from flask_mail import Mail
+from dotenv import load_dotenv
+
+load_dotenv()  # take environment variables from .env.
+
+APP_NAME = os.getenv('APP_NAME')
+SQLALCHEMY_DATABASE_URI = os.getenv('SQLALCHEMY_DATABASE_URI')
+SECRET_KEY = os.getenv('SECRET_KEY')
+MAIL_SERVER = os.getenv('MAIL_SERVER')
+MAIL_PORT  = os.getenv('MAIL_PORT')
+MAIL_USERNAME  = os.getenv('MAIL_USERNAME')
+MAIL_PASSWORD  = os.getenv('MAIL_PASSWORD')
+SUBJECT = os.getenv('SUBJECT')
+CONFIRMATION_URI = os.getenv('CONFIRMATION_URI')
 
 db = flask_sqlalchemy.SQLAlchemy()
 guard = flask_praetorian.Praetorian()
 cors = flask_cors.CORS()
 
 
-# A simple model that might be used by an app powered by flask-praetorian
+# A generic user model that might be used by an app powered by flask-praetorian
 class User(db.Model):
     
     __tablename__ = 'users'
@@ -19,7 +33,7 @@ class User(db.Model):
     username = db.Column(db.Text, unique=True, nullable=False)
     password = db.Column(db.Text, nullable=False)
     roles = db.Column(db.Text)
-    is_active = db.Column(db.Boolean, default=True, server_default='true')
+    is_active = db.Column(db.Boolean, default=False, server_default='true')
 
     @property
     def rolenames(self):
@@ -44,25 +58,39 @@ class User(db.Model):
         return self.is_active
 
 
-# Initialize flask app
+# Initialize flask app for the example
 app = flask.Flask(__name__)
+
 app.debug = True
-app.config['SECRET_KEY'] = 'my secret key'
+app.config['SECRET_KEY'] = SECRET_KEY
 app.config['JWT_ACCESS_LIFESPAN'] = {'hours': 24}
 app.config['JWT_REFRESH_LIFESPAN'] = {'days': 30}
 
 # Initialize the flask-praetorian instance for the app
 guard.init_app(app, User)
 
-# Initialize a local database
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://user_database:password@hostname:5432/database_name'
+# Initialize the database
+app.config['SQLALCHEMY_DATABASE_URI'] = SQLALCHEMY_DATABASE_URI
 
 db.init_app(app)
 
-# Initializes CORS so that the api_tool can talk to app
+# Initializes CORS so that the api_tool can talk to the example app
 cors.init_app(app)
 
-# Set up the routes
+# configuration of mail
+app.config['MAIL_SERVER'] = MAIL_SERVER
+app.config['MAIL_PORT'] = MAIL_PORT
+app.config['MAIL_USERNAME'] = MAIL_USERNAME
+app.config['MAIL_PASSWORD'] = MAIL_PASSWORD
+app.config['MAIL_DEFAULT_SENDER'] = (APP_NAME, MAIL_USERNAME)
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+
+#Initialize Mail extension
+mail = Mail()
+mail.init_app(app)
+
+# Set up some routes for the example
 @app.route('/api/')
 def home():
     return {"JWT Server Application":"Running!"}, 200
@@ -116,27 +144,51 @@ def protected():
 @app.route('/api/registration', methods=['POST'])
 def registration():
     
-    """Register user without validation email, only for test"""
+    """Register user with validation email"""
 
+    subject = SUBJECT
+    confirmation_sender=(APP_NAME, MAIL_USERNAME)
+    confirmation_uri = CONFIRMATION_URI
+    
     req = flask.request.get_json(force=True)
     username = req.get('username', None)
     password = req.get('password', None)
+    email = req.get('email', None)
     
-    with app.app_context():
-        db.create_all()
-        if db.session.query(User).filter_by(username=username).count() < 1:
-            db.session.add(User(
-                username=username,
-                password=guard.hash_password(password),
-                roles='user'
-            ))
+    if db.session.query(User).filter_by(username=username).count() < 1:
+        new_user = User(
+            username=username,
+            password=guard.hash_password(password),
+            roles='user',
+        )
+        db.session.add(new_user)
         db.session.commit()
+        
+        guard.send_registration_email(email, user=new_user, confirmation_sender=confirmation_sender,confirmation_uri=confirmation_uri, subject=subject, override_access_lifespan=None)
     
-    user = guard.authenticate(username, password)
-    ret = {'access_token': guard.encode_jwt_token(user)}
+        ret = {'message': 'successfully sent registration email to user {}'.format(
+            new_user.username
+        )}
+        return (flask.jsonify(ret), 201)
+    else:
+        ret = {'message':'user {} already exists on DB!'.format(username)}
+        return (flask.jsonify(ret), 409)
+    
+    
+@app.route('/api/finalize', methods=['GET'])
+def finalize():
+    
+    registration_token = guard.read_token_from_header()
+    user = guard.get_user_from_registration_token(registration_token)
+    
+    # user activation 
+    user.is_active = True
+    db.session.commit()
+    
+    ret = {'access_token': guard.encode_jwt_token(user), 'user': user.username}
 
-    return ret,200
-    
+    return (flask.jsonify(ret), 200)
+
 # Run the example
 if __name__ == '__main__':
     app.run()
