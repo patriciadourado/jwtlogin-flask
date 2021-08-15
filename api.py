@@ -17,7 +17,9 @@ MAIL_PORT  = os.getenv('MAIL_PORT')
 MAIL_USERNAME  = os.getenv('MAIL_USERNAME')
 MAIL_PASSWORD  = os.getenv('MAIL_PASSWORD')
 SUBJECT = os.getenv('SUBJECT')
+SUBJECT_RESET = os.getenv('SUBJECT_RESET')
 CONFIRMATION_URI = os.getenv('CONFIRMATION_URI')
+RESET_URI = os.getenv('RESET_URI')
 
 db = flask_sqlalchemy.SQLAlchemy()
 guard = flask_praetorian.Praetorian()
@@ -31,6 +33,7 @@ class User(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.Text, unique=True, nullable=False)
+    email = db.Column(db.Text, unique=True, nullable=False)
     password = db.Column(db.Text, nullable=False)
     roles = db.Column(db.Text)
     is_active = db.Column(db.Boolean, default=False, server_default='true')
@@ -45,6 +48,10 @@ class User(db.Model):
     @classmethod
     def lookup(cls, username):
         return cls.query.filter_by(username=username).one_or_none()
+
+    @classmethod
+    def lookup(cls, email):
+        return cls.query.filter_by(email=email).one_or_none()
 
     @classmethod
     def identify(cls, id):
@@ -83,8 +90,8 @@ app.config['MAIL_PORT'] = MAIL_PORT
 app.config['MAIL_USERNAME'] = MAIL_USERNAME
 app.config['MAIL_PASSWORD'] = MAIL_PASSWORD
 app.config['MAIL_DEFAULT_SENDER'] = (APP_NAME, MAIL_USERNAME)
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USE_SSL'] = False
+app.config['MAIL_USE_TLS'] = False
+app.config['MAIL_USE_SSL'] = True
 
 #Initialize Mail extension
 mail = Mail()
@@ -156,20 +163,25 @@ def registration():
     email = req.get('email', None)
     
     if db.session.query(User).filter_by(username=username).count() < 1:
-        new_user = User(
-            username=username,
-            password=guard.hash_password(password),
-            roles='user',
-        )
-        db.session.add(new_user)
-        db.session.commit()
+        if db.session.query(User).filter_by(email=email).count() < 1:
+            new_user = User(
+                username=username,
+                email=email,
+                password=guard.hash_password(password),
+                roles='user',
+            )
+            db.session.add(new_user)
+            db.session.commit()
         
-        guard.send_registration_email(email, user=new_user, confirmation_sender=confirmation_sender,confirmation_uri=confirmation_uri, subject=subject, override_access_lifespan=None)
-    
-        ret = {'message': 'successfully sent registration email to user {}'.format(
-            new_user.username
-        )}
-        return (flask.jsonify(ret), 201)
+            guard.send_registration_email(email, user=new_user, confirmation_sender=confirmation_sender,confirmation_uri=confirmation_uri, subject=subject, override_access_lifespan=None)
+        
+            ret = {'message': 'successfully sent registration email to user {}'.format(
+                new_user.username
+            )}
+            return (flask.jsonify(ret), 201)
+        else:
+            ret = {'message': 'email {} already exists on DB!'.format(email)}
+            return (flask.jsonify(ret), 303)
     else:
         ret = {'message':'user {} already exists on DB!'.format(username)}
         return (flask.jsonify(ret), 409)
@@ -186,8 +198,34 @@ def finalize():
     db.session.commit()
     
     ret = {'access_token': guard.encode_jwt_token(user), 'user': user.username}
-
+    print(ret)
     return (flask.jsonify(ret), 200)
+
+@app.route('/api/reset', methods=['POST'])
+def reset():
+    
+    """Reset password for activated accounts by email"""
+
+    reset_sender=(APP_NAME, MAIL_USERNAME)
+    reset_uri = RESET_URI
+    subject_rest = SUBJECT_RESET
+
+    req = flask.request.get_json(force=True)
+    email = req.get('email', None)
+
+    if db.session.query(User).filter_by(email=email).count() > 0:
+        if db.session.query(User).filter(User.email==email, User.is_active==True).scalar():
+            guard.send_reset_email(email, reset_sender=reset_sender, reset_uri=reset_uri, subject=subject_rest, override_access_lifespan=None)
+            
+            ret = {'message': 'successfully sent password reset email to {}'.format(email)}
+            return (flask.jsonify(ret), 200)
+        else:
+            ret = {'message': '{} account not activated! active it first!'.format(email)}
+            return (flask.jsonify(ret), 403)
+    else:
+        ret = {'message': 'email {} doest not exists on DB!'.format(email)}
+        return (flask.jsonify(ret), 404)
+
 
 # Run the example
 if __name__ == '__main__':
