@@ -204,7 +204,7 @@ def finalize():
 @app.route('/api/reset', methods=['POST'])
 def reset():
     
-    """Reset password for activated accounts by email"""
+    """Reset password email"""
 
     reset_sender=(APP_NAME, MAIL_USERNAME)
     reset_uri = RESET_URI
@@ -225,6 +225,24 @@ def reset():
     else:
         ret = {'message': 'email {} doest not exists on DB!'.format(email)}
         return (flask.jsonify(ret), 404)
+
+@app.route('/api/reset_finalize', methods=['POST'])
+def reset_finalize():
+
+    """Reset password on database by token"""
+
+    req = flask.request.get_json(force=True)
+    password = req.get('password', None)
+
+    try:
+        user = guard.validate_reset_token(req['token'])
+        user.password = guard.hash_password(password)
+        db.session.commit()
+        ret = {'message': 'password reset good for: {}'.format(user.email)}
+        return ret, 200
+    except Exception:
+        ret = {"Error resetting user password by token:"}
+        return ret, 500
 
 
 # Run the example
