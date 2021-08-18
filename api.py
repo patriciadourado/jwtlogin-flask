@@ -113,11 +113,21 @@ def login():
          -d '{"username":"myusername","password":"mypassword"}'
     """
     req = flask.request.get_json(force=True)
+
     username = req.get('username', None)
     password = req.get('password', None)
-    user = guard.authenticate(username, password)
-    ret = {'access_token': guard.encode_jwt_token(user)}
-    return ret, 200
+    user = db.session.query(User).filter_by(username=username).first()
+
+    if user:
+        if guard._verify_password(password, user.password):
+            ret = {'access_token': guard.encode_jwt_token(user)}
+            return (flask.jsonify(ret), 200)
+        else:
+            ret = {'access_token': ''}
+            return (flask.jsonify(ret), 401)
+    else:
+        ret = {'access_token': ''}
+        return (flask.jsonify(ret), 401)
 
   
 @app.route('/api/refresh', methods=['POST'])
@@ -233,13 +243,15 @@ def reset_finalize():
 
     req = flask.request.get_json(force=True)
     password = req.get('password', None)
+    
+    reset_token = guard.read_token_from_header()
 
     try:
-        user = guard.validate_reset_token(req['token'])
+        user = guard.validate_reset_token(reset_token)
         user.password = guard.hash_password(password)
         db.session.commit()
-        ret = {'message': 'password reset good for: {}'.format(user.email)}
-        return ret, 200
+        ret = {'access_token': guard.encode_jwt_token(user), 'user': user.username}
+        return (flask.jsonify(ret), 200)
     except Exception:
         ret = {"Error resetting user password by token:"}
         return ret, 500
